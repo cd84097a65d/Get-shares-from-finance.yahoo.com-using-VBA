@@ -55,7 +55,7 @@ Public Sub getYahooFinanceData(stockTicker$, startDate$, endDate$, _
             If IsNumeric(CSV_Fields(iCols)) Then
                 outTimeSeries(iRows, iCols) = Val(CSV_Fields(iCols))
             Else
-                outTimeSeries(iRows, iCols) = -1
+                outTimeSeries(iRows, iCols) = Undefined
             End If
         Next
     Next

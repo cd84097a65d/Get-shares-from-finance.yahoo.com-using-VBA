@@ -8,7 +8,7 @@ Option Explicit
 #End If
 
 Public Const Undefined& = -999
-Const clmSortingIndex = 5
+Public Const clmSortingIndex = 5
 
 Public Sub ProgressBar(stringToShow$)
     Dim timePeriod_s&, i&
@@ -76,39 +76,39 @@ Public Sub Sorting()
     Dim sortingRange As Range
     Dim nRows&, nColumns&, sortedColumn&
     Dim strRange As String
-    Dim offset%
-    Dim wsFunds As Worksheet
+    Dim Offset%
+    Dim wsShares As Worksheet
     
-    Set wsFunds = Worksheets(wsShares_Name)
+    Set wsShares = ThisWorkbook.Worksheets(wsShares_Name)
     
     nRows = 1
-    While wsFunds.Cells(nRows + 2, 1) <> ""
+    While wsShares.Cells(nRows + 2, 1) <> ""
         nRows = nRows + 1
     Wend
     nRows = nRows - 1
     
-    offset = Application.WorksheetFunction.Match("Sorting", wsFunds.Range("A:A"), 0)
+    Offset = Application.WorksheetFunction.Match("Sorting", wsShares.Range("A:A"), 0)
     
-    sortedColumn = wsFunds.Cells(offset + wsFunds.Cells(1, clmSortingIndex), 2)
+    sortedColumn = wsShares.Cells(Offset + wsShares.Cells(1, clmSortingIndex), 2)
     
-    nColumns = wsFunds.Cells(2, wsFunds.Columns.Count).End(xlToLeft).Column
+    nColumns = wsShares.Cells(2, wsShares.Columns.Count).End(xlToLeft).Column
     
-    strRange = wsFunds.Range(wsFunds.Cells(3, 1), wsFunds.Cells(nRows + 2, nColumns)).Address(ReferenceStyle:=xlA1)
+    strRange = wsShares.Range(wsShares.Cells(3, 1), wsShares.Cells(nRows + 2, nColumns)).Address(ReferenceStyle:=xlA1)
     
-    wsFunds.Sort.SortFields.Clear
+    wsShares.Sort.SortFields.Clear
     
     Set sortingRange = _
-        Range(wsFunds.Range(wsFunds.Cells(3, sortedColumn), wsFunds.Cells(nRows + 2, sortedColumn)).Address(ReferenceStyle:=xlA1))
+        Range(wsShares.Range(wsShares.Cells(3, sortedColumn), wsShares.Cells(nRows + 2, sortedColumn)).Address(ReferenceStyle:=xlA1))
     
-    If wsFunds.Cells(offset + wsFunds.Cells(1, clmSortingIndex), 3) Then
-        wsFunds.Sort.SortFields.Add Key:=sortingRange, _
+    If wsShares.Cells(Offset + wsShares.Cells(1, clmSortingIndex), 3) Then
+        wsShares.Sort.SortFields.Add Key:=sortingRange, _
             SortOn:=xlSortOnValues, Order:=xlDescending, DataOption:=xlSortNormal
     Else
-        wsFunds.Sort.SortFields.Add Key:=sortingRange, _
+        wsShares.Sort.SortFields.Add Key:=sortingRange, _
             SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
     End If
     
-    With wsFunds.Sort
+    With wsShares.Sort
         .SetRange Range(strRange)
         .Header = xlGuess
         .MatchCase = False

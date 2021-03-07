@@ -6,8 +6,6 @@ Option Explicit
 ' Samir Khan: http://investexcel.net/multiple-stock-quote-downloader-for-excel/
 
 ' TODOs
-' Progress bar on "x" must finish the loop
-' while updating of date time: shift all values to the right
 
 Const clmName& = 1
 Const clmTicker& = 2
@@ -26,6 +24,16 @@ Public Const clmData_High_Start& = 520
 Public Const clmData_Low_Start& = 780
 Public Const clmData_Close_Start& = 1040
 Public Const clmData_Average_Start& = 1300
+Public Const Offset = 2     ' row offset of data in sheets "Shares" and "TimeSeries"
+
+Const sort_1_Criterium& = 1 ' 23 days
+Const sort_2_Criterium& = 2 ' 46 days
+Const sort_3_Criterium& = 3 ' 69 days
+Const sort_3m& = 4          ' 3 m
+Const sort_6m& = 5          ' 6 m
+Const sort_9m& = 6          ' 9 m
+Const sort_timeStamp& = 7   ' Time stamp
+
 
 Public Const wsShares_Name$ = "Shares"
 Const wsTimeSeries_Name$ = "TimeSeries"
@@ -75,6 +83,62 @@ Sub GetProfile(ticker$, Name$, industry$, sector$, _
     country = Split(Split(resultFromYahoo, """country"":""")(1), """,""")(0)
 End Sub
 
+Sub UpdateSelected()
+    Dim period1$, period2$
+    Dim outDates_reference() As Date    ' reference dates from AAPL (why? see comments below)
+    Dim outDates() As Date
+    Dim outTimeSeries#()
+    Dim i&
+    Dim ticker$, Name$, profile$, sector$
+    Dim currency_$, Price#, country$, capitalization#, industry$
+    
+    Set wsShares = Worksheets(wsShares_Name)
+    Set wsTimeSeries = Worksheets(wsTimeSeries_Name)
+    
+    getCookieCrumb
+    
+    GetCurrencies
+    
+    period2 = CStr((Int(DateTime.Now) - CDate("01.01.1970")) * 60 * 60 * 24)
+    period1 = CStr((Int(DateTime.Now - 365) - CDate("01.01.1970")) * 60 * 60 * 24)
+    
+    ' problem: different markets/countries - different holidays
+    ' lazy solution on getting the dates:
+    ' I would take the apple (AAPL) and update the table with its dates
+    ' this must be enough: the handle with apple is very frequent
+    Call getYahooFinanceData("AAPL", period1, period2, "1d", outDates_reference, outTimeSeries)
+    Call UpdateDates(outDates_reference)
+    
+    i = wsShares.Cells(1, 2)
+    
+    ticker = wsShares.Cells(i + Offset, clmTicker)
+    Name = wsShares.Cells(i + Offset, clmName)
+    currency_ = wsShares.Cells(i + Offset, clmCurrency)
+    
+    If wsShares.Cells(i + Offset, clmName) = "" Then
+        Call GetProfile(ticker, Name, industry, sector, profile, currency_, country)
+        wsShares.Cells(i + Offset, clmName) = Split(Name, " (")(0)
+        wsShares.Cells(i + Offset, clmProfile) = profile
+        wsShares.Cells(i + Offset, clmSector) = sector
+        wsShares.Cells(i + Offset, clmIndustry) = industry
+        wsShares.Cells(i + Offset, clmCurrency) = currency_
+        wsShares.Cells(i + Offset, clmCountry) = country
+    End If
+    Application.StatusBar = CStr(i + Offset) & ", " & Name
+    
+    Call GetPrice(ticker, Price, capitalization)
+    wsShares.Cells(i + Offset, clmCapitalization) = capitalization
+    wsShares.Cells(i + Offset, clmPrice) = Price
+    wsShares.Cells(i + Offset, clmPrice_Euro) = Price / GetCurrency(currency_)
+    
+    Call getYahooFinanceData(ticker, period1, period2, "1d", outDates, outTimeSeries)
+    Call UpdateSheets(outDates_reference, outDates, outTimeSeries, ticker)
+    
+    wsShares.Cells(i + Offset, clmTimeStamp) = DateTime.Now
+    Application.StatusBar = ""
+    GetIdealTransactions
+End Sub
+
 Sub GetPrice(ticker$, Price#, capitalization#)
     Dim objRequest
     Dim tickerURL$
@@ -106,9 +170,6 @@ Sub GetPrice(ticker$, Price#, capitalization#)
 End Sub
 
 Sub Update_Shares()
-    Dim ticker$, Name$, profile$, sector$
-    Dim industry$, i&
-    Dim currency_$, Price#, country$, capitalization#
     Dim period1$, period2$
     Dim outDates_reference() As Date    ' reference dates from AAPL (why? see comments below)
     Dim outDates() As Date
@@ -131,41 +192,78 @@ Sub Update_Shares()
     Call getYahooFinanceData("AAPL", period1, period2, "1d", outDates_reference, outTimeSeries)
     Call UpdateDates(outDates_reference)
     
-    i = 3
-    Do While wsShares.Cells(i, clmTicker) <> ""
-        If wsShares.Cells(i, clmTimeStamp) < DateTime.Date Then
-            ticker = wsShares.Cells(i, clmTicker)
-            Name = wsShares.Cells(i, clmName)
-            currency_ = wsShares.Cells(i, clmCurrency)
+    ' update shares sorted by first criterium
+    Call GetSetsOfShares(sort_1_Criterium, period1, period2, outDates_reference)
+    
+    ' update shares sorted by second criterium
+    Call GetSetsOfShares(sort_2_Criterium, period1, period2, outDates_reference)
+    
+    ' update shares sorted by third criterium
+    Call GetSetsOfShares(sort_3_Criterium, period1, period2, outDates_reference)
+    
+    ' update shares sorted by 3 months
+    Call GetSetsOfShares(sort_3m, period1, period2, outDates_reference)
+    
+    ' update shares sorted by 6 months
+    Call GetSetsOfShares(sort_6m, period1, period2, outDates_reference)
+    
+    ' update shares sorted by 9 months
+    Call GetSetsOfShares(sort_9m, period1, period2, outDates_reference)
+    
+    ' update shares sorted by time stamp
+    Call GetSetsOfShares(sort_timeStamp, period1, period2, outDates_reference)
+    
+    ' at the end sort using the first criterium
+    wsShares.Cells(1, clmSortingIndex) = sort_1_Criterium
+    Sorting
+    
+    Application.StatusBar = ""
+End Sub
+
+' sort according to "sortingCriterium" and update the first 20 shares (20 is read from "A1")
+' by updating of 20 first shares in 7 different sortings 65 shares were updated
+Sub GetSetsOfShares(sortingCriterium&, period1$, period2$, outDates_reference() As Date)
+    Dim i&, nToUpdate&
+    Dim ticker$, Name$, profile$, sector$
+    Dim currency_$, Price#, country$, capitalization#, industry$
+    Dim outDates() As Date
+    Dim outTimeSeries#()
+    
+    wsShares.Cells(1, clmSortingIndex) = sortingCriterium
+    Sorting
+    
+    nToUpdate = wsShares.Cells(1, 1)
+    
+    For i = 1 To nToUpdate
+        If Int(wsShares.Cells(i + Offset, clmTimeStamp)) < DateTime.Date Then
+            ticker = wsShares.Cells(i + Offset, clmTicker)
+            Name = wsShares.Cells(i + Offset, clmName)
+            currency_ = wsShares.Cells(i + Offset, clmCurrency)
             
-            If wsShares.Cells(i, clmName) = "" Then
+            If wsShares.Cells(i + Offset, clmName) = "" Then
                 Call GetProfile(ticker, Name, industry, sector, profile, currency_, country)
-                wsShares.Cells(i, clmName) = Split(Name, " (")(0)
-                wsShares.Cells(i, clmProfile) = profile
-                wsShares.Cells(i, clmSector) = sector
-                wsShares.Cells(i, clmIndustry) = industry
-                wsShares.Cells(i, clmCurrency) = currency_
-                wsShares.Cells(i, clmCountry) = country
+                wsShares.Cells(i + Offset, clmName) = Split(Name, " (")(0)
+                wsShares.Cells(i + Offset, clmProfile) = profile
+                wsShares.Cells(i + Offset, clmSector) = sector
+                wsShares.Cells(i + Offset, clmIndustry) = industry
+                wsShares.Cells(i + Offset, clmCurrency) = currency_
+                wsShares.Cells(i + Offset, clmCountry) = country
             End If
-            Application.StatusBar = CStr(i) & ", " & Name
+            Application.StatusBar = CStr(i + Offset) & ", " & Name
             
             Call GetPrice(ticker, Price, capitalization)
-            wsShares.Cells(i, clmCapitalization) = capitalization
-            wsShares.Cells(i, clmPrice) = Price
-            wsShares.Cells(i, clmPrice_Euro) = Price / GetCurrency(currency_)
+            wsShares.Cells(i + Offset, clmCapitalization) = capitalization
+            wsShares.Cells(i + Offset, clmPrice) = Price
+            wsShares.Cells(i + Offset, clmPrice_Euro) = Price / GetCurrency(currency_)
             
             Call getYahooFinanceData(ticker, period1, period2, "1d", outDates, outTimeSeries)
             Call UpdateSheets(outDates_reference, outDates, outTimeSeries, ticker)
             
             Call ProgressBar(Name)
             
-            wsShares.Cells(i, clmTimeStamp) = DateTime.Now
+            wsShares.Cells(i + Offset, clmTimeStamp) = DateTime.Now
         End If
-
-        i = i + 1
-    Loop
-    
-    Application.StatusBar = ""
+    Next i
 End Sub
 
 Sub UpdateDates(outDates_reference() As Date)
@@ -180,41 +278,43 @@ Sub UpdateDates(outDates_reference() As Date)
     shift = i - (clmData_Open_Start - UBound(outDates_reference) + 1)
     lastRow = wsTimeSeries.Cells(wsTimeSeries.Rows.Count, clmData_Open_Start).End(xlUp).Row
     
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_Open_Start + 1 - UBound(outDates_reference))), _
-        wsTimeSeries.Cells(lastRow, clmData_Open_Start)).Copy
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_Start - UBound(outDates_reference) + 1), _
-        wsTimeSeries.Cells(3, clmData_Open_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_Start - shift + 1), _
-        wsTimeSeries.Cells(lastRow, clmData_Open_Start)).ClearContents
-    
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_High_Start + 1 - UBound(outDates_reference))), _
-        wsTimeSeries.Cells(lastRow, clmData_High_Start)).Copy
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_High_Start - UBound(outDates_reference) + 1), _
-        wsTimeSeries.Cells(3, clmData_High_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_High_Start - shift + 1), _
-        wsTimeSeries.Cells(lastRow, clmData_High_Start)).ClearContents
-    
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_Low_Start + 1 - UBound(outDates_reference))), _
-        wsTimeSeries.Cells(lastRow, clmData_Low_Start)).Copy
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Low_Start - UBound(outDates_reference) + 1), _
-        wsTimeSeries.Cells(3, clmData_Low_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Low_Start - shift + 1), _
-        wsTimeSeries.Cells(lastRow, clmData_Low_Start)).ClearContents
-    
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_Close_Start + 1 - UBound(outDates_reference))), _
-        wsTimeSeries.Cells(lastRow, clmData_Close_Start)).Copy
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Close_Start - UBound(outDates_reference) + 1), _
-        wsTimeSeries.Cells(3, clmData_Close_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
-    wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Close_Start - shift + 1), _
-        wsTimeSeries.Cells(lastRow, clmData_Close_Start)).ClearContents
-    
-    nColumns = UBound(outDates_reference)
-    For i = 1 To UBound(outDates_reference)
-        wsTimeSeries.Cells(2, clmData_Open_Start - nColumns + i) = outDates_reference(i)
-        wsTimeSeries.Cells(2, clmData_High_Start - nColumns + i) = outDates_reference(i)
-        wsTimeSeries.Cells(2, clmData_Low_Start - nColumns + i) = outDates_reference(i)
-        wsTimeSeries.Cells(2, clmData_Close_Start - nColumns + i) = outDates_reference(i)
-    Next i
+    If shift <> 0 Then
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_Open_Start + 1 - UBound(outDates_reference))), _
+            wsTimeSeries.Cells(lastRow, clmData_Open_Start)).Copy
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_Start - UBound(outDates_reference) + 1), _
+            wsTimeSeries.Cells(3, clmData_Open_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_Start - shift + 1), _
+            wsTimeSeries.Cells(lastRow, clmData_Open_Start)).ClearContents
+        
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_High_Start + 1 - UBound(outDates_reference))), _
+            wsTimeSeries.Cells(lastRow, clmData_High_Start)).Copy
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_High_Start - UBound(outDates_reference) + 1), _
+            wsTimeSeries.Cells(3, clmData_High_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_High_Start - shift + 1), _
+            wsTimeSeries.Cells(lastRow, clmData_High_Start)).ClearContents
+        
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_Low_Start + 1 - UBound(outDates_reference))), _
+            wsTimeSeries.Cells(lastRow, clmData_Low_Start)).Copy
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Low_Start - UBound(outDates_reference) + 1), _
+            wsTimeSeries.Cells(3, clmData_Low_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Low_Start - shift + 1), _
+            wsTimeSeries.Cells(lastRow, clmData_Low_Start)).ClearContents
+        
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, shift + (clmData_Close_Start + 1 - UBound(outDates_reference))), _
+            wsTimeSeries.Cells(lastRow, clmData_Close_Start)).Copy
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Close_Start - UBound(outDates_reference) + 1), _
+            wsTimeSeries.Cells(3, clmData_Close_Start - UBound(outDates_reference) + 1)).PasteSpecial xlPasteValues
+        wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Close_Start - shift + 1), _
+            wsTimeSeries.Cells(lastRow, clmData_Close_Start)).ClearContents
+        
+        nColumns = UBound(outDates_reference)
+        For i = 1 To UBound(outDates_reference)
+            wsTimeSeries.Cells(2, clmData_Open_Start - nColumns + i) = outDates_reference(i)
+            wsTimeSeries.Cells(2, clmData_High_Start - nColumns + i) = outDates_reference(i)
+            wsTimeSeries.Cells(2, clmData_Low_Start - nColumns + i) = outDates_reference(i)
+            wsTimeSeries.Cells(2, clmData_Close_Start - nColumns + i) = outDates_reference(i)
+        Next i
+    End If
     Application.ScreenUpdating = True
 End Sub
 
@@ -235,14 +335,35 @@ Sub UpdateSheets(outDates_reference() As Date, outDates() As Date, outTimeSeries
         For j = 1 To UBound(outDates_reference)
             ' look for the same dates:
             If outDates(i) = outDates_reference(j) Then
-                wsTimeSeries.Cells(timeSeriesLine, clmData_Open_Start - nColumns + j) = outTimeSeries(i, 1)
-                wsTimeSeries.Cells(timeSeriesLine, clmData_High_Start - nColumns + j) = outTimeSeries(i, 2)
-                wsTimeSeries.Cells(timeSeriesLine, clmData_Low_Start - nColumns + j) = outTimeSeries(i, 3)
-                wsTimeSeries.Cells(timeSeriesLine, clmData_Close_Start - nColumns + j) = outTimeSeries(i, 4)
+                If outTimeSeries(i, 1) = Undefined Then
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_Open_Start - nColumns + j) = ""
+                Else
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_Open_Start - nColumns + j) = _
+                        outTimeSeries(i, 1)
+                End If
+                If outTimeSeries(i, 2) = Undefined Then
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_High_Start - nColumns + j) = ""
+                Else
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_High_Start - nColumns + j) = _
+                        outTimeSeries(i, 2)
+                End If
+                If outTimeSeries(i, 3) = Undefined Then
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_Low_Start - nColumns + j) = ""
+                Else
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_Low_Start - nColumns + j) = _
+                        outTimeSeries(i, 3)
+                End If
+                If outTimeSeries(i, 4) = Undefined Then
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_Close_Start - nColumns + j) = ""
+                Else
+                    wsTimeSeries.Cells(timeSeriesLine, clmData_Close_Start - nColumns + j) = _
+                        outTimeSeries(i, 4)
+                End If
                 Exit For
             End If
         Next j
     Next i
+    
     Application.ScreenUpdating = True
 End Sub
 

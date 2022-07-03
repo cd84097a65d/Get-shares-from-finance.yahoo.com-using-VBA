@@ -10,26 +10,32 @@ Dim wsSimulations As Worksheet
 Dim wsTimeSeries As Worksheet
 Dim wsShares As Worksheet
 
-Function EstimateIdealTransactions#(dates() As Date, average#(), transactions$(), _
+' estimates maximal performance of selected share in % and shows the points of buys/sales
+' this was rather complicated and unstable
+' this part is necessary for training of neural network
+'
+' the curve is splitted to buy/sell pairs that gives maximal performance
+' i need a new algo to do this
+' possible candidate: iterative procedure which tests the influence of removing of one
+' buy/selling pair on the final performance
+Function EstimateIdealTransactions#(dates() As Date, high#(), low#(), average#(), _
         buyingIndex&(), sellingIndex&(), performancePerTransaction#)
-    Dim i&, j&, k&
+    Dim i&, j&, k&, m&, n&, indexMax&, indexMin&
+    Dim sellingIndex2Remove&(), buyingIndex2Remove&()
+    Dim tmpBool As Boolean
     Dim transactionsChanged As Boolean
-    
+
     transactionsChanged = False
     ReDim buyingIndex(UBound(dates))
     ReDim sellingIndex(UBound(dates))
-    
+
     ' initial set of transactions
     ' first transaction should be buy:
     For j = 1 To UBound(average)
-        If average(j) = Undefined Then
-            transactions(j) = ""
-        Else
+        If average(j) <> Undefined Then
             For k = j + 1 To UBound(average)
                 If average(k) <> Undefined Then
                     If average(j) < average(k) Then
-                        transactions(j) = "Buy"
-                        transactions(k) = "Sell"
                         buyingIndex(1) = j
                         sellingIndex(1) = k
                         GoTo Step2
@@ -41,56 +47,128 @@ Function EstimateIdealTransactions#(dates() As Date, average#(), transactions$()
     Next j
 
 Step2:
-    For i = k + 1 To UBound(average) - 1
-        If average(i) = Undefined Or average(i + 1) = Undefined Then
-            transactions(i) = ""
-            transactions(i + 1) = ""
-        Else
-            ' always a sequence of buy/sell, buy/sell
+    For i = k + 1 To UBound(high) - 1
+        If average(i) <> Undefined And average(i + 1) <> Undefined Then
+            ' always a sequence of buy/sell, buy/sell ...
             If average(i) < average(i + 1) Then
-                transactions(i) = "Buy"
-                transactions(i + 1) = "Sell"
                 buyingIndex(i) = i
                 sellingIndex(i + 1) = i + 1
             End If
         End If
     Next i
-    
-    Call CompactIndex(buyingIndex)
-    Call CompactIndex(sellingIndex)
-    
+
+    transactionsChanged = True
+    While transactionsChanged = True
+Step3:
+        transactionsChanged = False
+        For i = 1 To UBound(buyingIndex) - 1
+            If buyingIndex(i) <> 0 And buyingIndex(i + 1) = 0 Then
+                If average(buyingIndex(i)) > average(buyingIndex(i) + 1) Then
+                    buyingIndex(i) = 0
+                    buyingIndex(i + 1) = buyingIndex(i + 1) + 1
+                    transactionsChanged = True
+                End If
+            End If
+        Next i
+
+        For i = 1 To UBound(sellingIndex) - 1
+            If sellingIndex(i) <> 0 And sellingIndex(i + 1) = 0 Then
+                If average(sellingIndex(i)) < average(sellingIndex(i) + 1) Then
+                    sellingIndex(i + 1) = sellingIndex(i) + 1
+                    sellingIndex(i) = 0
+                    transactionsChanged = True
+                End If
+            End If
+        Next i
+    Wend
+
+Step4:
+    ReDim sellingIndex2Remove(0)
+    ReDim buyingIndex2Remove(0)
     For i = 1 To UBound(buyingIndex)
         For j = 1 To UBound(sellingIndex)
-            If buyingIndex(i) = sellingIndex(j) Then
-                buyingIndex(i) = 0
-                sellingIndex(j) = 0
+            If buyingIndex(i) = sellingIndex(j) And buyingIndex(i) <> 0 Then
+                indexMax = buyingIndex(i - 1)
+                indexMin = sellingIndex(j)
+                For k = 0 To UBound(buyingIndex)
+                    If j + k < UBound(sellingIndex) Then
+                        If buyingIndex(i + k) = 0 Then
+                            Exit For
+                        End If
+
+                        If buyingIndex(i + k) = sellingIndex(j + k) Then
+                            If average(indexMax) > average(buyingIndex(i + k)) Then
+                                If k > 0 Then
+                                    ReDim Preserve buyingIndex2Remove(UBound(buyingIndex2Remove) + 1)
+                                    buyingIndex2Remove(UBound(buyingIndex2Remove)) = indexMax
+                                End If
+
+                                indexMax = buyingIndex(i + k)
+                            Else
+                                ReDim Preserve buyingIndex2Remove(UBound(buyingIndex2Remove) + 1)
+                                buyingIndex2Remove(UBound(buyingIndex2Remove)) = i + k
+                            End If
+
+                            If average(sellingIndex(j + k + 1)) > average(indexMin) Then
+                                ReDim Preserve sellingIndex2Remove(UBound(sellingIndex2Remove) + 1)
+                                sellingIndex2Remove(UBound(sellingIndex2Remove)) = indexMin
+
+                                indexMin = sellingIndex(j + k + 1)
+                            Else
+                                ReDim Preserve sellingIndex2Remove(UBound(sellingIndex2Remove) + 1)
+                                sellingIndex2Remove(UBound(sellingIndex2Remove)) = j + k + 1
+                            End If
+                        End If
+                    End If
+                Next k
+
+                For k = 1 To UBound(buyingIndex2Remove)
+                    buyingIndex(buyingIndex2Remove(k)) = 0
+                Next k
+                For k = 1 To UBound(sellingIndex2Remove)
+                    sellingIndex(sellingIndex2Remove(k)) = 0
+                Next k
+
+                GoTo Step4
             End If
         Next j
     Next i
-    
+
     Call CompactIndex(buyingIndex)
     Call CompactIndex(sellingIndex)
-    
-'    ' loop over transactions
-'    transactionsChanged = True
-'    While transactionsChanged = True
-'Step3:
-'        transactionsChanged = False
-'        For i = 1 To UBound(buyingIndex) - 1
-''            ' rule 1: first points are above the next (market is falling)
-''            If average(buyingIndex(i)) > average(buyingIndex(i + 1)) And _
-''                average(sellingIndex(i)) > average(sellingIndex(i + 1)) Then
-''                transactions(buyingIndex(i)) = ""
-''                transactions(sellingIndex(i)) = ""
-''                buyingIndex(i) = 0
-''                sellingIndex(i) = 0
-''                transactionsChanged = True
-''
-''                Call CompactIndex(buyingIndex)
-''                Call CompactIndex(sellingIndex)
-''
-''                GoTo Step3
-''            End If
+
+    ' loop over transactions
+    transactionsChanged = True
+    While transactionsChanged = True
+Step5:
+        transactionsChanged = False
+        For i = 1 To UBound(buyingIndex) - 1
+            If high(buyingIndex(i)) > low(sellingIndex(i)) Then
+                buyingIndex(i) = 0
+                sellingIndex(i) = 0
+                transactionsChanged = True
+
+                Call CompactIndex(buyingIndex)
+                Call CompactIndex(sellingIndex)
+
+                GoTo Step5
+            End If
+
+
+
+
+'            ' rule 1: first points are above the next (market is falling)
+'            If average(buyingIndex(i)) > average(buyingIndex(i + 1)) And _
+'                average(sellingIndex(i)) > average(sellingIndex(i + 1)) Then
+'                buyingIndex(i) = 0
+'                sellingIndex(i) = 0
+'                transactionsChanged = True
+'
+'                Call CompactIndex(buyingIndex)
+'                Call CompactIndex(sellingIndex)
+'
+'                GoTo Step5
+'            End If
 '
 '            ' rule 2: if the profit is below the bank comission, then remove buy/sell transaction
 '            If (average(sellingIndex(i)) - average(buyingIndex(i))) / average(buyingIndex(i)) < _
@@ -103,28 +181,31 @@ Step2:
 '
 '                transactionsChanged = True
 '
-'                GoTo Step3
+'                GoTo Step5
 '            End If
-'        Next i
-'    Wend
-    
+        Next i
+    Wend
+
     ' final analysis to estimate performance
     EstimateIdealTransactions = 1
     performancePerTransaction = 0
     For i = 1 To UBound(buyingIndex)
         EstimateIdealTransactions = EstimateIdealTransactions * _
-            (1# + (average(sellingIndex(i)) - average(buyingIndex(i))) / average(buyingIndex(i)))
+            (1# + (low(sellingIndex(i)) - high(buyingIndex(i))) / high(buyingIndex(i)))
         performancePerTransaction = performancePerTransaction + _
-            (average(sellingIndex(i)) - average(buyingIndex(i))) / average(buyingIndex(i))
+            (low(sellingIndex(i)) - high(buyingIndex(i))) / high(buyingIndex(i))
     Next i
     EstimateIdealTransactions = EstimateIdealTransactions - 1
     performancePerTransaction = performancePerTransaction / UBound(buyingIndex) / 2
 End Function
 
+' TODO: make new algo of min/max search!
 Sub GetIdealTransactions()
     Dim rowRepresentation&, clmStart&, clmEnd&, i&, performancePerTransaction#
-    Dim dates() As Date, average#(), transactions$()
+    Dim dates() As Date, average#(), high#(), low#()
     Dim buyingIndex&(), sellingIndex&()
+    
+    ScreenUpdatingOn
     
     Set wsShares = ThisWorkbook.Worksheets(wsShares_Name)
     
@@ -133,45 +214,60 @@ Sub GetIdealTransactions()
     rowRepresentation = Application.WorksheetFunction.Match("Representation", _
         wsShares.Range("A:A"), 0) + RepresentationOffset
     
-    clmStart = 18
-    While wsShares.Cells(1, clmStart) = ""
-        clmStart = clmStart + 1
-    Wend
+    clmStart = 19
+    For clmStart = 19 To 16000
+        If Not IsError(wsShares.Cells(rowRepresentation - 1, clmStart)) And _
+            Not IsEmpty(wsShares.Cells(rowRepresentation - 1, clmStart)) Then
+            Exit For
+        End If
+    Next clmStart
     
-    clmEnd = clmStart
-    While wsShares.Cells(1, clmEnd) <> ""
-        clmEnd = clmEnd + 1
-    Wend
-    clmEnd = clmEnd - 1
+    For clmEnd = clmStart To 16000
+        If IsEmpty(wsShares.Cells(rowRepresentation - 1, clmEnd)) Then
+            clmEnd = clmEnd - 1
+            Exit For
+        End If
+    Next clmEnd
     
     ReDim dates(clmEnd - clmStart + 1)
+    ReDim high(clmEnd - clmStart + 1)
+    ReDim low(clmEnd - clmStart + 1)
     ReDim average(clmEnd - clmStart + 1)
-    ReDim transactions(clmEnd - clmStart + 1)
     
     For i = clmStart To clmEnd
-        dates(i - clmStart + 1) = wsShares.Cells(1, i)
+        dates(i - clmStart + 1) = wsShares.Cells(rowRepresentation - 1, i)
         If IsNumeric(wsShares.Cells(rowRepresentation, i)) Then
             average(i - clmStart + 1) = wsShares.Cells(rowRepresentation, i)
         Else
             average(i - clmStart + 1) = Undefined
         End If
+        If IsNumeric(wsShares.Cells(rowRepresentation + 2, i)) Then
+            high(i - clmStart + 1) = wsShares.Cells(rowRepresentation + 2, i)
+        Else
+            high(i - clmStart + 1) = Undefined
+        End If
+        If IsNumeric(wsShares.Cells(rowRepresentation + 3, i)) Then
+            low(i - clmStart + 1) = wsShares.Cells(rowRepresentation + 3, i)
+        Else
+            low(i - clmStart + 1) = Undefined
+        End If
     Next i
     
-    wsShares.Range(wsShares.Cells(rowRepresentation + 1, clmStart), _
-        wsShares.Cells(rowRepresentation + 2, clmEnd)).ClearContents
+    wsShares.Range(wsShares.Cells(rowRepresentation + 5, clmStart), _
+        wsShares.Cells(rowRepresentation + 6, clmEnd)).ClearContents
     
     wsShares.Cells(rowRepresentation - 1, 7) = _
-        EstimateIdealTransactions(dates, average, transactions, buyingIndex, sellingIndex, _
+        EstimateIdealTransactions(dates, high, low, average, buyingIndex, sellingIndex, _
         performancePerTransaction)
     wsShares.Cells(rowRepresentation - 1, 6) = performancePerTransaction
     
     ' todo: cleanup
     For i = 1 To UBound(buyingIndex)
-        wsShares.Cells(rowRepresentation + 1, buyingIndex(i) + clmStart - 1) = _
+        wsShares.Cells(rowRepresentation + 5, buyingIndex(i) + clmStart - 1) = _
             wsShares.Cells(rowRepresentation, buyingIndex(i) + clmStart - 1)
     Next i
     For i = 1 To UBound(buyingIndex)
-        wsShares.Cells(rowRepresentation + 2, sellingIndex(i) + clmStart - 1) = _
+        wsShares.Cells(rowRepresentation + 6, sellingIndex(i) + clmStart - 1) = _
             wsShares.Cells(rowRepresentation, sellingIndex(i) + clmStart - 1)
     Next i
     
@@ -220,7 +316,7 @@ Sub Model()
     i = wsSimulations.Cells(16, wsSimulations.Columns.Count).End(xlToLeft).Column
     wsSimulations.Range(wsSimulations.Cells(15, 1), wsSimulations.Cells(15, i)).ClearContents
     For j = 1 To i
-        k = wsSimulations.Cells(wsSimulations.Rows.Count, j).End(xlUp).Row
+        k = wsSimulations.Cells(wsSimulations.Rows.Count, j).End(xlUp).row
         If k > 14 Then
             wsSimulations.Range(wsSimulations.Cells(16, j), wsSimulations.Cells(k, j)).ClearContents
         End If
@@ -385,18 +481,18 @@ Sub OvertakeAndCleanup(tickers$(), days() As Date, open_#(), high_#(), low_#(), 
     nShares = nShares - 3
     ReDim Preserve tickers(nShares)
     
-    ReDim days(clmData_Open_Start)
+    ReDim days(clmData_Open_End)
     currentDay = 0
-    For i = clmData_Open_Start - 5 To 1 Step -1   ' 5 means that only 255 from 260 dates are analyzed (this is true, because the year contains max 253 working days)
+    For i = clmData_Open_End - 5 To 1 Step -1   ' 5 means that only 255 from 260 dates are analyzed (this is true, because the year contains max 253 working days)
         ' check that 2/3 of data for current date are valid
         ' othervise this date will be not taken in consideration:
         j = Application.WorksheetFunction.Count( _
-            wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_Start + 1 - i), _
-            wsTimeSeries.Cells(2 + nShares, clmData_Open_Start + 1 - i)))
+            wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_End + 1 - i), _
+            wsTimeSeries.Cells(2 + nShares, clmData_Open_End + 1 - i)))
         
         If j > 2 * nShares / 3 Then
             currentDay = currentDay + 1
-            days(currentDay) = wsTimeSeries.Cells(2, clmData_Open_Start + 1 - i)
+            days(currentDay) = wsTimeSeries.Cells(2, clmData_Open_End + 1 - i)
         End If
     Next i
     
@@ -407,41 +503,41 @@ Sub OvertakeAndCleanup(tickers$(), days() As Date, open_#(), high_#(), low_#(), 
     ReDim average_#(nShares, nDays)
     
     currentDay = 0
-    For i = clmData_Open_Start - 5 To 1 Step -1   ' 5 means that only 255 from 260 dates are analyzed (this is true, because the year contains max 253 working days)
+    For i = clmData_Open_End - 5 To 1 Step -1   ' 5 means that only 255 from 260 dates are analyzed (this is true, because the year contains max 253 working days)
         ' check that 2/3 of data for current date are valid
         ' othervise this date will be not taken in consideration:
         j = Application.WorksheetFunction.Count( _
-            wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_Start + 1 - i), _
-            wsTimeSeries.Cells(2 + nShares, clmData_Open_Start + 1 - i)) _
+            wsTimeSeries.Range(wsTimeSeries.Cells(3, clmData_Open_End + 1 - i), _
+            wsTimeSeries.Cells(2 + nShares, clmData_Open_End + 1 - i)) _
         )
         
         If j > 2 * nShares / 3 Then
             currentDay = currentDay + 1
             For j = 1 To nShares
-                If wsTimeSeries.Cells(j + 2, clmData_Open_Start + 1 - i) = "" Then
+                If wsTimeSeries.Cells(j + 2, clmData_Open_End + 1 - i) = "" Then
                     open_(j, currentDay) = Undefined
                 Else
-                    open_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Open_Start + 1 - i)
+                    open_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Open_End + 1 - i)
                 End If
-                If wsTimeSeries.Cells(j + 2, clmData_High_Start + 1 - i) = "" Then
+                If wsTimeSeries.Cells(j + 2, clmData_High_End + 1 - i) = "" Then
                     high_(j, currentDay) = Undefined
                 Else
-                    high_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_High_Start + 1 - i)
+                    high_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_High_End + 1 - i)
                 End If
-                If wsTimeSeries.Cells(j + 2, clmData_Low_Start + 1 - i) = "" Then
+                If wsTimeSeries.Cells(j + 2, clmData_Low_End + 1 - i) = "" Then
                     low_(j, currentDay) = Undefined
                 Else
-                    low_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Low_Start + 1 - i)
+                    low_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Low_End + 1 - i)
                 End If
-                If wsTimeSeries.Cells(j + 2, clmData_Close_Start + 1 - i) = "" Then
+                If wsTimeSeries.Cells(j + 2, clmData_Close_End + 1 - i) = "" Then
                     close_(j, currentDay) = Undefined
                 Else
-                    close_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Close_Start + 1 - i)
+                    close_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Close_End + 1 - i)
                 End If
-                If wsTimeSeries.Cells(j + 2, clmData_Average_Start + 1 - i) = "" Then
+                If wsTimeSeries.Cells(j + 2, clmData_Average_End + 1 - i) = "" Then
                     average_(j, currentDay) = Undefined
                 Else
-                    average_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Average_Start + 1 - i)
+                    average_(j, currentDay) = wsTimeSeries.Cells(j + 2, clmData_Average_End + 1 - i)
                 End If
             Next j
         End If

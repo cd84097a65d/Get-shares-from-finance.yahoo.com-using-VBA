@@ -33,10 +33,10 @@ Public Sub getYahooFinanceData(stockTicker$, startDate$, endDate$, _
     Set objRequest = CreateObject("WinHttp.WinHttpRequest.5.1")
     With objRequest
         .Open "GET", tickerURL, False
-        .setRequestHeader "Cookie", cookie
+        '.setRequestHeader "Cookie", cookie
         .send
         .waitForResponse
-        resultFromYahoo = .responseText
+        resultFromYahoo = .ResponseText
     End With
     '***************************************************
         
@@ -77,13 +77,14 @@ Public Function getCookieCrumb() As Boolean
         Set objRequest = CreateObject("WinHttp.WinHttpRequest.5.1")
         With objRequest
             .Open "GET", "https://finance.yahoo.com/lookup?s=bananas", False
-            .setRequestHeader "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8"
+            '.setRequestHeader "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8"
             .send
             .waitForResponse (10)
-            cookie = Split(.getResponseHeader("Set-Cookie"), ";")(0)
-            crumbStartPos = InStrRev(.responseText, """crumb"":""") + 9
+            'cookie = Split(.getResponseHeader("Set-Cookie"), ";")(0)
+            'crumbStartPos = InStr(1, .ResponseText, """CrumbStore"":{""crumb"":""", vbBinaryCompare) + Len("""CrumbStore"":{""crumb"":""")
+            crumbStartPos = InStrRev(.ResponseText, """crumb"":""") + 9
             crumbEndPos = crumbStartPos + 11 'InStr(crumbStartPos, .ResponseText, """", vbBinaryCompare)
-            crumb = Mid(.responseText, crumbStartPos, crumbEndPos - crumbStartPos)
+            crumb = Mid(.ResponseText, crumbStartPos, crumbEndPos - crumbStartPos)
         End With
         
         If Len(crumb) = 11 Then 'a valid crumb is 11 characters long

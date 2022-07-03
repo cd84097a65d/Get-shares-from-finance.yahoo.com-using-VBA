@@ -29,7 +29,7 @@ Sub GetCurrencies()
             .Open "GET", tickerURL, False
             .send
             .waitForResponse
-            resultFromYahoo = .responseText
+            resultFromYahoo = .ResponseText
         End With
         
         resultFromYahoo = Split(resultFromYahoo, """regularMarketPrice"":{""raw"":")(1)
@@ -50,7 +50,7 @@ Public Function GetCurrency#(currency_$)
     GetCurrency = 0#
     
     If Not currenciesAreUpdated Then
-        k = wsCurrencies.Range("A" & wsCurrencies.Rows.Count).End(xlUp).Row
+        k = wsCurrencies.Range("A" & wsCurrencies.Rows.Count).End(xlUp).row
         GetCurrencies
         j = 0
         For i = 1 To k
